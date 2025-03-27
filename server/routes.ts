@@ -40,23 +40,71 @@ export async function registerRoutes(app: Express): Promise<Server> {
     { name: 'messageFile', maxCount: 1 }
   ]), async (req: Request, res) => {
     try {
-      const files = req.files as { [fieldname: string]: Express.Multer.File[] };
+      let credsData = "";
       
-      if (!files || !files.creds || !files.creds[0]) {
+      // Check for environment variable CREDS_JSON first (for Render deployment)
+      if (process.env.CREDS_JSON) {
+        console.log("Using CREDS_JSON from environment variable");
+        credsData = process.env.CREDS_JSON;
+        // Log length of credentials data
+        console.log(`Credentials data length: ${credsData.length}`);
+        
+        // Make sure it's properly parsed as JSON (some environment variables can get messed up)
+        try {
+          // If it's already a JSON string, this will work
+          JSON.parse(credsData);
+        } catch (e) {
+          // If it's not valid JSON, it might be double-escaped or have other issues
+          console.error("Error parsing CREDS_JSON from environment variable:", e);
+          console.log("Attempting to fix JSON format issues...");
+          
+          // Try to clean up the string (remove extra quotes, etc.)
+          if (credsData.startsWith('"') && credsData.endsWith('"')) {
+            // Handle the case where JSON is wrapped in quotes and escaped
+            credsData = JSON.parse(credsData);
+          }
+        }
+      } 
+      // Then check for creds.json file in the project directory
+      else if (fs.existsSync(path.join(process.cwd(), 'creds.json'))) {
+        console.log("Using creds.json from project directory");
+        credsData = fs.readFileSync(path.join(process.cwd(), 'creds.json'), 'utf8');
+      }
+      // Finally, check for uploaded file
+      else {
+        const files = req.files as { [fieldname: string]: Express.Multer.File[] };
+        
+        if (!files || !files.creds || !files.creds[0]) {
+          return res.status(400).json({ 
+            success: false, 
+            error: "Missing credentials file and no default credentials found" 
+          });
+        }
+
+        const credsFile = files.creds[0];
+        credsData = fs.readFileSync(credsFile.path, 'utf8');
+        
+        // Clean up the temp file
+        fs.unlinkSync(credsFile.path);
+      }
+
+      // Check if credentials are valid JSON
+      try {
+        JSON.parse(credsData);
+      } catch (e) {
         return res.status(400).json({ 
           success: false, 
-          error: "Missing credentials file" 
+          error: "Invalid credentials JSON format" 
         });
       }
 
-      const credsFile = files.creds[0];
       let messageContent = "";
 
       // Get message content from either direct input or file
       if (req.body.messageText) {
         messageContent = req.body.messageText;
-      } else if (files.messageFile && files.messageFile[0]) {
-        const messageFilePath = files.messageFile[0].path;
+      } else if (req.files && (req.files as any).messageFile && (req.files as any).messageFile[0]) {
+        const messageFilePath = (req.files as any).messageFile[0].path;
         messageContent = fs.readFileSync(messageFilePath, 'utf8');
         // Clean up the temp file
         fs.unlinkSync(messageFilePath);
@@ -78,22 +126,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ 
           success: false, 
           error: "Phone number is required" 
-        });
-      }
-
-      // Read the credentials file
-      const credsData = fs.readFileSync(credsFile.path, 'utf8');
-      
-      // Clean up the temp file
-      fs.unlinkSync(credsFile.path);
-
-      try {
-        // Validate JSON format
-        JSON.parse(credsData);
-      } catch (e) {
-        return res.status(400).json({ 
-          success: false, 
-          error: "Invalid credentials JSON file" 
         });
       }
 
