@@ -1,0 +1,20 @@
+services:
+  - type: web
+    name: whatsapp-automation-tool
+    env: node
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /api/whatsapp/status
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: whatsapp-db
+          property: connectionString
+
+databases:
+  - name: whatsapp-db
+    databaseName: whatsapp_db
+    user: whatsapp_user
+    plan: free
